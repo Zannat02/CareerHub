@@ -1,0 +1,21 @@
+{
+  "name": "careerhub-server",
+  "version": "1.0.0",
+  "description": "CareerHub backend",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "mongodb": "^7.7.0",
+    "multer": "^2.5.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
