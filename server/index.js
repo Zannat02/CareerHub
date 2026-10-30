@@ -4,14 +4,14 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
-const { MongoClient, ServerApiVersion,ObjectId  } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 const app = express();
 const port = process.env.PORT || 5000;
 
 const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
   .split(',')
-  .map((o) => o.trim());
+    .map((o) => o.trim().replace(/\/+$/, ''));
 
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json({ limit: '100kb' }));
@@ -29,7 +29,7 @@ const client = new MongoClient(uri, {
   },
 });
 
-let applications; 
+let applications;
 
 
 //  Validation 
@@ -74,6 +74,14 @@ const hasValidSignature = (buffer) => {
   return pdf || docx || doc;
 };
 
+
+
+const normalizePhone = (phone) => phone.replace(/[\s\-().]/g, '');
+
+
+const isValidPhone = (phone) =>
+  /^\+[1-9]\d{6,14}$/.test(phone) || /^0\d{7,14}$/.test(phone);
+
 const isRealDate = (value) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const [y, m, d] = value.split('-').map(Number);
@@ -109,12 +117,12 @@ const validate = (doc, file) => {
     errors.email = 'Please enter a valid email address.';
   }
 
-  // Phone 
+   // phone
   if (!doc.phone) {
     errors.phone = 'Phone number is required.';
-  } else if (!/^(?:\+?88)?01[3-9]\d{8}$/.test(doc.phone.replace(/[\s-]/g, ''))) {
+  } else if (!isValidPhone(normalizePhone(doc.phone))) {
     errors.phone =
-      'Enter a valid Bangladeshi phone number (e.g. +8801XXXXXXXXX).';
+      'Enter a valid phone number with country code (e.g. +8801712345678).';
   }
 
   // Position
@@ -234,7 +242,7 @@ app.post(
 
     // 2. Data clean/normalize
     doc.email = doc.email.toLowerCase();
-    doc.phone = '+88' + doc.phone.replace(/[\s-]/g, '').slice(-11);
+      doc.phone = normalizePhone(doc.phone);
 
     // 3. Duplicate check (same email + same position)
     const exists = await applications.findOne(
@@ -243,7 +251,7 @@ app.post(
     );
     if (exists) return res.status(409).send(duplicateError);
 
- 
+
     const ext = path.extname(req.file.originalname).toLowerCase();
     doc.resume = {
       filename: path.basename(req.file.originalname).slice(0, 100),
@@ -261,7 +269,7 @@ app.post(
         applicationId: result.insertedId,
       });
     } catch (err) {
-      
+
       if (err.code === 11000) return res.status(409).send(duplicateError);
       throw err;
     }
@@ -275,7 +283,7 @@ app.get('/', (req, res) => {
 async function start() {
   await client.connect();
   applications = client.db('careerhubDB').collection('applications');
-    await applications.createIndex({ email: 1, position: 1 }, { unique: true });
+  await applications.createIndex({ email: 1, position: 1 }, { unique: true });
   await client.db('admin').command({ ping: 1 });
   console.log('Pinged your deployment. You successfully connected to MongoDB!');
 
