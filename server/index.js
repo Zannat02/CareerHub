@@ -2,8 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 const multer = require('multer');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion,ObjectId  } = require('mongodb');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -28,10 +29,10 @@ const client = new MongoClient(uri, {
   },
 });
 
-let applications; // DB connect hoyar por set hobe (Phase 3 e use hobe)
+let applications; 
 
 
-// ---------- Validation (Phase 2) ----------
+//  Validation 
 
 const POSITIONS = [
   'Frontend Developer',
@@ -54,7 +55,7 @@ const ALLOWED_FIELDS = [
 const MAX_RESUME_SIZE = 5 * 1024 * 1024; // 5MB
 const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx'];
 
-// Shudhu allowed field nibe, string hole trim korbe
+
 const pickFields = (body = {}) => {
   const out = {};
   for (const key of ALLOWED_FIELDS) {
@@ -63,7 +64,7 @@ const pickFields = (body = {}) => {
   return out;
 };
 
-// File er shuru'r byte dekhe asol type check (extension bypass thekate)
+
 const hasValidSignature = (buffer) => {
   const startsWith = (bytes) =>
     buffer.length >= bytes.length && bytes.every((b, i) => buffer[i] === b);
@@ -108,7 +109,7 @@ const validate = (doc, file) => {
     errors.email = 'Please enter a valid email address.';
   }
 
-  // Phone (Bangladesh)
+  // Phone 
   if (!doc.phone) {
     errors.phone = 'Phone number is required.';
   } else if (!/^(?:\+?88)?01[3-9]\d{8}$/.test(doc.phone.replace(/[\s-]/g, ''))) {
@@ -172,7 +173,7 @@ const validate = (doc, file) => {
 
 
 
-// ---------- Create application (Phase 3) ----------
+// Create application
 
 const RESUME_TYPES = {
   '.pdf': 'application/pdf',
@@ -187,7 +188,7 @@ const upload = multer({
   limits: { fileSize: MAX_RESUME_SIZE, files: 1 },
 }).single('resume');
 
-// Multer er error gulo field-wise format e ferot dey
+
 const uploadResume = (req, res, next) => {
   upload(req, res, (err) => {
     if (!err) return next();
@@ -260,7 +261,7 @@ app.post(
         applicationId: result.insertedId,
       });
     } catch (err) {
-      // Double-click/race hole unique index e dhora porbe
+      
       if (err.code === 11000) return res.status(409).send(duplicateError);
       throw err;
     }
@@ -286,4 +287,95 @@ async function start() {
 start().catch((err) => {
   console.error('Failed to start server:', err);
   process.exit(1);
+});
+
+
+
+//Admin routes + error handlers
+
+
+const requireAdmin = (req, res, next) => {
+  const key = process.env.ADMIN_KEY;
+  if (!key) {
+    return res
+      .status(503)
+      .send({ error: 'Admin access is not configured on the server' });
+  }
+  const sent = Buffer.from(req.get('x-admin-key') || '');
+  const real = Buffer.from(key);
+  if (sent.length !== real.length || !crypto.timingSafeEqual(sent, real)) {
+    return res.status(401).send({ error: 'Unauthorized' });
+  }
+  next();
+};
+
+const parseId = (req, res) => {
+  if (!ObjectId.isValid(req.params.id)) {
+    res.status(400).send({ error: 'Invalid application id' });
+    return null;
+  }
+  return new ObjectId(req.params.id);
+};
+
+
+const withoutFile = { projection: { 'resume.data': 0 } };
+
+app.get(
+  '/applications',
+  requireAdmin,
+  wrap(async (req, res) => {
+    const result = await applications
+      .find({}, withoutFile)
+      .sort({ _id: -1 })
+      .toArray();
+    res.send(result);
+  })
+);
+
+app.get(
+  '/applications/:id',
+  requireAdmin,
+  wrap(async (req, res) => {
+    const _id = parseId(req, res);
+    if (!_id) return;
+    const application = await applications.findOne({ _id }, withoutFile);
+    if (!application) {
+      return res.status(404).send({ error: 'Application not found' });
+    }
+    res.send(application);
+  })
+);
+
+app.get(
+  '/applications/:id/resume',
+  requireAdmin,
+  wrap(async (req, res) => {
+    const _id = parseId(req, res);
+    if (!_id) return;
+    const application = await applications.findOne(
+      { _id },
+      { projection: { resume: 1 } }
+    );
+    if (!application || !application.resume) {
+      return res.status(404).send({ error: 'Resume not found' });
+    }
+    const { filename, contentType, data } = application.resume;
+    res.attachment(filename);
+    res.type(contentType);
+    res.send(Buffer.from(data.buffer.subarray(0, data.length())));
+  })
+);
+
+// 404 + global error handler  
+
+app.use((req, res) => {
+  res.status(404).send({ error: 'Route not found' });
+});
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).send({ error: 'Invalid JSON body' });
+  }
+  res.status(500).send({ error: 'Internal server error' });
 });
