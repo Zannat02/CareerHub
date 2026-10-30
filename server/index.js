@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
+const multer = require('multer');
 const { MongoClient, ServerApiVersion } = require('mongodb');
 
 const app = express();
@@ -166,6 +168,105 @@ const validate = (doc, file) => {
   return errors;
 };
 
+
+
+
+
+// ---------- Create application (Phase 3) ----------
+
+const RESUME_TYPES = {
+  '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx':
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
+
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_RESUME_SIZE, files: 1 },
+}).single('resume');
+
+// Multer er error gulo field-wise format e ferot dey
+const uploadResume = (req, res, next) => {
+  upload(req, res, (err) => {
+    if (!err) return next();
+
+    if (err instanceof multer.MulterError) {
+      let message = err.message;
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        message = 'Resume must be 5MB or smaller.';
+      } else if (
+        err.code === 'LIMIT_UNEXPECTED_FILE' ||
+        err.code === 'LIMIT_FILE_COUNT'
+      ) {
+        message = 'Upload only one file using the field name "resume".';
+      }
+      return res
+        .status(400)
+        .send({ error: 'Validation failed', errors: { resume: message } });
+    }
+    next(err);
+  });
+};
+
+
+const wrap = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch(next);
+
+const duplicateError = {
+  error: 'You have already applied for this position with this email.',
+  errors: { email: 'You have already applied for this position with this email.' },
+};
+
+app.post(
+  '/applications',
+  uploadResume,
+  wrap(async (req, res) => {
+    const doc = pickFields(req.body);
+
+    // 1. Validation
+    const errors = validate(doc, req.file);
+    if (Object.keys(errors).length) {
+      return res.status(400).send({ error: 'Validation failed', errors });
+    }
+
+    // 2. Data clean/normalize
+    doc.email = doc.email.toLowerCase();
+    doc.phone = '+88' + doc.phone.replace(/[\s-]/g, '').slice(-11);
+
+    // 3. Duplicate check (same email + same position)
+    const exists = await applications.findOne(
+      { email: doc.email, position: doc.position },
+      { projection: { _id: 1 } }
+    );
+    if (exists) return res.status(409).send(duplicateError);
+
+ 
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    doc.resume = {
+      filename: path.basename(req.file.originalname).slice(0, 100),
+      contentType: RESUME_TYPES[ext],
+      size: req.file.size,
+      data: req.file.buffer,
+    };
+    doc.status = 'Pending';
+    doc.createdAt = new Date();
+
+    try {
+      const result = await applications.insertOne(doc);
+      res.status(201).send({
+        message: 'Application submitted successfully.',
+        applicationId: result.insertedId,
+      });
+    } catch (err) {
+      // Double-click/race hole unique index e dhora porbe
+      if (err.code === 11000) return res.status(409).send(duplicateError);
+      throw err;
+    }
+  })
+);
+
 app.get('/', (req, res) => {
   res.send('CareerHub server is running');
 });
@@ -173,6 +274,7 @@ app.get('/', (req, res) => {
 async function start() {
   await client.connect();
   applications = client.db('careerhubDB').collection('applications');
+    await applications.createIndex({ email: 1, position: 1 }, { unique: true });
   await client.db('admin').command({ ping: 1 });
   console.log('Pinged your deployment. You successfully connected to MongoDB!');
 
