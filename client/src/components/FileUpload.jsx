@@ -11,6 +11,7 @@ const formatSize = (bytes) => {
 const typesLabel = RESUME_EXTENSIONS.map((ext) => ext.slice(1).toUpperCase()).join(', ')
 const maxLabel = `${MAX_RESUME_SIZE / 1024 / 1024}MB`
 
+
 function FileUpload({ id, file, onChange, error, disabled = false }) {
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
@@ -24,7 +25,7 @@ function FileUpload({ id, file, onChange, error, disabled = false }) {
   }
 
   const handleRemove = () => {
-    if (inputRef.current) inputRef.current.value = '' // same file abar select kora jabe
+    if (inputRef.current) inputRef.current.value = '' 
     onChange(null)
   }
 
@@ -74,6 +75,7 @@ function FileUpload({ id, file, onChange, error, disabled = false }) {
             <p className="text-xs text-slate-500">{formatSize(file.size)}</p>
           </div>
           <button
+            id={`${id}-button`}
             type="button"
             onClick={handleRemove}
             disabled={disabled}
@@ -85,6 +87,7 @@ function FileUpload({ id, file, onChange, error, disabled = false }) {
         </div>
       ) : (
         <button
+          id={`${id}-button`}
           type="button"
           onClick={openPicker}
           disabled={disabled}
