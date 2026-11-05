@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   AtSign,
   Briefcase,
@@ -22,6 +22,7 @@ import FormField from './FormField'
 import FileUpload from './FileUpload'
 import Toast from './Toast'
 import { controlClass } from '../utils/formStyles'
+import { submitApplication } from '../utils/api'
 import { MESSAGE_MAX, POSITIONS } from '../utils/constants'
 import {
   FIELD_NAMES,
@@ -43,29 +44,59 @@ const INITIAL_VALUES = {
   message: '',
 }
 
+const TEXT_FIELDS = ['fullName', 'email', 'phone', 'position', 'availableFrom', 'message']
+
+// Server e pathanor jonno FormData (file shoho)
+const buildFormData = (values) => {
+  const formData = new FormData()
+  for (const name of TEXT_FIELDS) formData.append(name, values[name].trim())
+  formData.append('resume', values.resume)
+  return formData
+}
+
+// Error toast er message
+const errorMessage = (err, hasFieldErrors) => {
+  if (err.status === 400 && hasFieldErrors) {
+    return 'The server found problems with some fields. Please fix the highlighted errors and try again.'
+  }
+  return err.message
+}
+
 function ApplicationForm() {
   const [values, setValues] = useState(INITIAL_VALUES)
   const [touched, setTouched] = useState({})
+  const [serverErrors, setServerErrors] = useState({})
   const [resumeContentError, setResumeContentError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [slow, setSlow] = useState(false)
   const [toast, setToast] = useState(null)
   const resumeCheck = useRef(0)
+  const [focusRequest, setFocusRequest] = useState(null)
+  const focusHandled = useRef(null)
 
-
+  // Client-side errors (resume er content check alada, async)
   const baseErrors = validateForm(values)
   const errors =
     !baseErrors.resume && resumeContentError
       ? { ...baseErrors, resume: resumeContentError }
       : baseErrors
 
-
-  const shown = (name) => (touched[name] ? errors[name] : '')
+  // Server er error shobsomoy dekhabe, client er error shudhu touched field e
+  const shown = (name) => serverErrors[name] || (touched[name] ? errors[name] : '')
   const touch = (name) => setTouched((t) => ({ ...t, [name]: true }))
+  const clearServerError = (name) =>
+    setServerErrors((prev) => {
+      if (!prev[name]) return prev
+      const next = { ...prev }
+      delete next[name]
+      return next
+    })
 
   const handleChange = (e) => {
     const { name, value } = e.target
     setValues((v) => ({ ...v, [name]: value }))
-   
+    clearServerError(name)
+    // select ar date e blur na-o hote pare, tai change e-i touched
     if (name === 'position' || name === 'availableFrom') touch(name)
   }
 
@@ -75,6 +106,7 @@ function ApplicationForm() {
     const token = ++resumeCheck.current
     setValues((v) => ({ ...v, resume: file }))
     setResumeContentError('')
+    clearServerError('resume')
     touch('resume')
 
     if (file && !validateField('resume', file)) {
@@ -93,12 +125,21 @@ function ApplicationForm() {
     document.getElementById(id)?.focus()
   }
 
+  // Server error er prothom field e focus. Submit sesh hoye field enable hole tarpor
+  // (disabled field e focus jay na). Prottek request ek-bar-i focus kore.
+  useEffect(() => {
+    if (!focusRequest || submitting || focusHandled.current === focusRequest) return
+    focusHandled.current = focusRequest
+    focusField(focusRequest.name)
+  }, [focusRequest, submitting])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (submitting) return
 
     setTouched(Object.fromEntries(FIELD_NAMES.map((name) => [name, true])))
 
+    // 1. Client-side validation
     const finalErrors = validateForm(values)
     if (
       !finalErrors.resume &&
@@ -120,15 +161,36 @@ function ApplicationForm() {
       return
     }
 
+    // 2. Server e pathano (server o abar validate kore)
+    setServerErrors({})
     setSubmitting(true)
-    // TEMP (Phase 11 e eta asol API call diye replace hobe)
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    setSubmitting(false)
-    setToast({
-      type: 'success',
-      title: 'Form looks good!',
-      message: 'All fields are valid. The API connection comes in the next step.',
-    })
+    const slowTimer = setTimeout(() => setSlow(true), 6000)
+
+    try {
+      const data = await submitApplication(buildFormData(values))
+      setToast({
+        type: 'success',
+        title: 'Application submitted!',
+        message: `${data.message} We'll get back to you soon.`,
+      })
+      setValues(INITIAL_VALUES)
+      setTouched({})
+      setResumeContentError('')
+    } catch (err) {
+      const fieldErrors = err.errors || {}
+      const firstServerError = FIELD_NAMES.find((name) => fieldErrors[name])
+      setServerErrors(fieldErrors)
+      if (firstServerError) setFocusRequest({ name: firstServerError })
+      setToast({
+        type: 'error',
+        title: "Couldn't submit your application",
+        message: errorMessage(err, Boolean(firstServerError)),
+      })
+    } finally {
+      clearTimeout(slowTimer)
+      setSlow(false)
+      setSubmitting(false)
+    }
   }
 
   const common = (name) => ({
@@ -310,13 +372,20 @@ function ApplicationForm() {
         </button>
 
         <div
-          className="mt-3 flex h-6 items-center justify-center gap-2 text-sm text-slate-600"
+          className="mt-3 flex min-h-6 flex-col items-center justify-center gap-1 text-sm text-slate-600"
           aria-live="polite"
         >
           {submitting && (
             <>
-              <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
-              Submitting...
+              <span className="flex items-center gap-2">
+                <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Submitting...
+              </span>
+              {slow && (
+                <span className="text-xs text-slate-500">
+                  The server is waking up. This can take up to a minute.
+                </span>
+              )}
             </>
           )}
         </div>

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CloudUpload, FileText, X } from 'lucide-react'
 import { MAX_RESUME_SIZE, RESUME_EXTENSIONS } from '../utils/constants'
 
@@ -12,9 +12,16 @@ const typesLabel = RESUME_EXTENSIONS.map((ext) => ext.slice(1).toUpperCase()).jo
 const maxLabel = `${MAX_RESUME_SIZE / 1024 / 1024}MB`
 
 
+
 function FileUpload({ id, file, onChange, error, disabled = false }) {
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
+
+
+  
+  useEffect(() => {
+    if (!file && inputRef.current) inputRef.current.value = ''
+  }, [file])
 
   const openPicker = () => {
     if (!disabled) inputRef.current?.click()
@@ -26,6 +33,7 @@ function FileUpload({ id, file, onChange, error, disabled = false }) {
 
   const handleRemove = () => {
     if (inputRef.current) inputRef.current.value = '' 
+    
     onChange(null)
   }
 
